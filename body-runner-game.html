@@ -1,0 +1,883 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Body Runner — Gerakkan Tubuhmu!</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@400;600&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #0a0a0f;
+    color: #fff;
+    font-family: 'Rajdhani', sans-serif;
+    overflow: hidden;
+    height: 100vh;
+    width: 100vw;
+  }
+
+  #game-wrapper {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  #gameCanvas {
+    display: block;
+    border: 1px solid #1a1a2e;
+    box-shadow: 0 0 60px rgba(0, 255, 200, 0.08);
+  }
+
+  /* Camera preview bottom-right */
+  #cam-container {
+    position: fixed;
+    bottom: 16px;
+    right: 16px;
+    width: 160px;
+    height: 120px;
+    border-radius: 10px;
+    overflow: hidden;
+    border: 2px solid rgba(0, 255, 200, 0.4);
+    box-shadow: 0 0 20px rgba(0, 255, 200, 0.15);
+    z-index: 100;
+    background: #000;
+  }
+
+  #camVideo {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transform: scaleX(-1);
+    opacity: 0.85;
+  }
+
+  #poseCanvas {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%;
+    height: 100%;
+    transform: scaleX(-1);
+  }
+
+  #cam-label {
+    position: absolute;
+    bottom: 4px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 9px;
+    font-family: 'Orbitron', monospace;
+    color: rgba(0, 255, 200, 0.7);
+    letter-spacing: 1px;
+    white-space: nowrap;
+    text-shadow: 0 0 8px rgba(0,255,200,0.5);
+  }
+
+  #cam-dot {
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #ff3333;
+    animation: blink 1s infinite;
+  }
+
+  @keyframes blink {
+    0%,100% { opacity: 1; }
+    50% { opacity: 0.2; }
+  }
+
+  /* Overlay screens */
+  .screen {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 200;
+    background: rgba(0,0,0,0.88);
+    backdrop-filter: blur(6px);
+  }
+
+  .screen.hidden { display: none; }
+
+  .screen h1 {
+    font-family: 'Orbitron', monospace;
+    font-size: clamp(2rem, 6vw, 4rem);
+    font-weight: 900;
+    letter-spacing: 4px;
+    color: #00ffc8;
+    text-shadow: 0 0 30px rgba(0,255,200,0.6), 0 0 60px rgba(0,255,200,0.3);
+    margin-bottom: 0.5rem;
+  }
+
+  .screen .subtitle {
+    font-size: clamp(0.9rem, 2vw, 1.2rem);
+    color: rgba(255,255,255,0.5);
+    letter-spacing: 2px;
+    margin-bottom: 2.5rem;
+    text-transform: uppercase;
+    font-family: 'Orbitron', monospace;
+    font-size: 0.7rem;
+  }
+
+  .instructions {
+    background: rgba(0, 255, 200, 0.05);
+    border: 1px solid rgba(0,255,200,0.2);
+    border-radius: 12px;
+    padding: 1.5rem 2rem;
+    margin-bottom: 2.5rem;
+    max-width: 420px;
+    text-align: center;
+  }
+
+  .instructions p {
+    color: rgba(255,255,255,0.75);
+    line-height: 1.7;
+    font-size: 1rem;
+  }
+
+  .instructions strong {
+    color: #00ffc8;
+  }
+
+  .btn-start {
+    font-family: 'Orbitron', monospace;
+    font-size: 1rem;
+    font-weight: 700;
+    letter-spacing: 3px;
+    padding: 14px 48px;
+    background: transparent;
+    color: #00ffc8;
+    border: 2px solid #00ffc8;
+    border-radius: 8px;
+    cursor: pointer;
+    text-transform: uppercase;
+    transition: all 0.2s;
+    box-shadow: 0 0 20px rgba(0,255,200,0.2);
+  }
+
+  .btn-start:hover {
+    background: rgba(0,255,200,0.1);
+    box-shadow: 0 0 30px rgba(0,255,200,0.4);
+    transform: translateY(-2px);
+  }
+
+  .btn-start:active { transform: translateY(0); }
+
+  #score-display {
+    font-family: 'Orbitron', monospace;
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #00ffc8;
+    margin-top: 1.5rem;
+    letter-spacing: 2px;
+    text-shadow: 0 0 20px rgba(0,255,200,0.5);
+  }
+
+  #hud {
+    position: fixed;
+    top: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 2rem;
+    align-items: center;
+    z-index: 50;
+    pointer-events: none;
+  }
+
+  .hud-item {
+    font-family: 'Orbitron', monospace;
+    font-size: 0.75rem;
+    letter-spacing: 2px;
+    color: rgba(255,255,255,0.5);
+    text-align: center;
+  }
+
+  .hud-val {
+    display: block;
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: #00ffc8;
+    text-shadow: 0 0 15px rgba(0,255,200,0.4);
+  }
+
+  #tracking-status {
+    position: fixed;
+    top: 16px;
+    left: 16px;
+    font-family: 'Orbitron', monospace;
+    font-size: 0.55rem;
+    letter-spacing: 1.5px;
+    color: rgba(255,255,255,0.3);
+    z-index: 50;
+  }
+
+  #tracking-dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #ff4444;
+    margin-right: 5px;
+    vertical-align: middle;
+    transition: background 0.3s;
+  }
+
+  #tracking-dot.active { background: #00ffc8; }
+
+  .cam-permission-note {
+    position: fixed;
+    bottom: 150px;
+    right: 16px;
+    width: 160px;
+    font-size: 0.65rem;
+    color: rgba(255,255,255,0.35);
+    text-align: center;
+    font-family: 'Rajdhani', sans-serif;
+    z-index: 100;
+    line-height: 1.4;
+  }
+
+  /* Keyboard hint */
+  #kb-hint {
+    position: fixed;
+    bottom: 16px;
+    left: 16px;
+    font-family: 'Orbitron', monospace;
+    font-size: 0.5rem;
+    color: rgba(255,255,255,0.2);
+    letter-spacing: 1px;
+    z-index: 50;
+    line-height: 1.8;
+  }
+</style>
+</head>
+<body>
+
+<!-- SCREENS -->
+<div id="screen-start" class="screen">
+  <h1>BODY RUNNER</h1>
+  <p class="subtitle">Move your body · dodge the gaps</p>
+  <div class="instructions">
+    <p>
+      Gerakkan <strong>seluruh tubuhmu</strong> ke kiri dan kanan untuk menghindari <strong>jalan berlubang</strong>.<br><br>
+      Kamera akan mendeteksi posisi tubuhmu secara real-time.<br><br>
+      Condongkan badan → karakter bergerak!
+    </p>
+  </div>
+  <button class="btn-start" id="btn-play">MULAI MAIN</button>
+  <p style="margin-top:1rem; font-size:0.7rem; color:rgba(255,255,255,0.25); font-family: Orbitron, monospace; letter-spacing:1px;">
+    Izinkan akses kamera saat diminta
+  </p>
+</div>
+
+<div id="screen-gameover" class="screen hidden">
+  <h1>GAME OVER</h1>
+  <p class="subtitle">Jatuh ke lubang!</p>
+  <div id="score-display"></div>
+  <br><br>
+  <button class="btn-start" id="btn-restart">COBA LAGI</button>
+</div>
+
+<!-- GAME -->
+<div id="game-wrapper">
+  <canvas id="gameCanvas"></canvas>
+</div>
+
+<!-- HUD -->
+<div id="hud" class="hidden">
+  <div class="hud-item">SKOR<span class="hud-val" id="hud-score">0</span></div>
+  <div class="hud-item">LEVEL<span class="hud-val" id="hud-level">1</span></div>
+  <div class="hud-item">NYAWA<span class="hud-val" id="hud-lives">❤️❤️❤️</span></div>
+</div>
+
+<!-- TRACKING STATUS -->
+<div id="tracking-status">
+  <span id="tracking-dot"></span><span id="tracking-label">NO CAMERA</span>
+</div>
+
+<!-- CAMERA PREVIEW -->
+<div id="cam-container">
+  <video id="camVideo" autoplay muted playsinline></video>
+  <canvas id="poseCanvas"></canvas>
+  <div id="cam-dot"></div>
+  <div id="cam-label">BODY TRACKING</div>
+</div>
+
+<div class="cam-permission-note">Izinkan akses kamera untuk kontrol tubuh</div>
+
+<!-- KEYBOARD HINT -->
+<div id="kb-hint">
+  ← → atau A D untuk keyboard
+</div>
+
+<!-- MEDIAPIPE -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+
+<script>
+// ===================== CONFIG =====================
+const LANES = 5;
+const LANE_W_FRAC = 1 / LANES;
+const CHAR_W = 38;
+const CHAR_H = 52;
+const HOLE_HEIGHT = 180;
+const BASE_SPEED = 2.8;
+const MAX_SPEED = 9;
+
+// ===================== STATE =====================
+let canvas, ctx;
+let W, H;
+let gameRunning = false;
+let score = 0, level = 1, lives = 3;
+let charX, charY;
+let targetCharX;
+let obstacles = [];
+let particles = [];
+let frameCount = 0;
+let spawnInterval = 90;
+let speed = BASE_SPEED;
+let lastTime = 0;
+let animId;
+let invincible = false, invincibleTimer = 0;
+
+// Body tracking
+let poseX = 0.5; // 0=left, 1=right normalized
+let trackingActive = false;
+let smoothPoseX = 0.5;
+
+// Keys fallback
+const keys = {};
+document.addEventListener('keydown', e => keys[e.key] = true);
+document.addEventListener('keyup', e => keys[e.key] = false);
+
+// ===================== INIT CANVAS =====================
+function initCanvas() {
+  canvas = document.getElementById('gameCanvas');
+  ctx = canvas.getContext('2d');
+  resizeCanvas();
+  window.addEventListener('resize', resizeCanvas);
+}
+
+function resizeCanvas() {
+  const maxW = Math.min(window.innerWidth, 520);
+  const maxH = window.innerHeight;
+  const aspect = 9/16;
+  if (maxW / maxH < aspect) {
+    W = maxW;
+    H = Math.round(W / aspect);
+  } else {
+    H = maxH;
+    W = Math.round(H * aspect);
+  }
+  canvas.width = W;
+  canvas.height = H;
+  if (gameRunning && charY) charY = H - 90;
+}
+
+// ===================== MEDIAPIPE POSE =====================
+function initPose() {
+  const videoEl = document.getElementById('camVideo');
+  const poseCanvasEl = document.getElementById('poseCanvas');
+  const poseCtx = poseCanvasEl.getContext('2d');
+
+  const pose = new Pose({
+    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
+  });
+
+  pose.setOptions({
+    modelComplexity: 0,
+    smoothLandmarks: true,
+    enableSegmentation: false,
+    minDetectionConfidence: 0.5,
+    minTrackingConfidence: 0.5
+  });
+
+  pose.onResults((results) => {
+    poseCtx.clearRect(0, 0, poseCanvasEl.width, poseCanvasEl.height);
+
+    if (results.poseLandmarks) {
+      trackingActive = true;
+      document.getElementById('tracking-dot').classList.add('active');
+      document.getElementById('tracking-label').textContent = 'TRACKING ON';
+
+      // Draw skeleton on small cam canvas
+      drawConnectors(poseCtx, results.poseLandmarks, POSE_CONNECTIONS, {
+        color: 'rgba(0,255,200,0.6)', lineWidth: 1.5
+      });
+      drawLandmarks(poseCtx, results.poseLandmarks, {
+        color: 'rgba(0,255,200,0.9)', lineWidth: 1, radius: 2
+      });
+
+      // Use hips center x for movement (landmarks 23=left hip, 24=right hip)
+      const lHip = results.poseLandmarks[23];
+      const rHip = results.poseLandmarks[24];
+      const lShoulder = results.poseLandmarks[11];
+      const rShoulder = results.poseLandmarks[12];
+
+      if (lHip && rHip && lShoulder && rShoulder) {
+        const hipX = (lHip.x + rHip.x) / 2;
+        const shoulderX = (lShoulder.x + rShoulder.x) / 2;
+        // Average body center
+        const bodyX = (hipX * 0.6 + shoulderX * 0.4);
+        // Note: mediapipe x is mirrored (0=right, 1=left in selfie), we flip it
+        poseX = 1 - bodyX;
+      }
+    } else {
+      trackingActive = false;
+      document.getElementById('tracking-dot').classList.remove('active');
+      document.getElementById('tracking-label').textContent = 'SEARCHING...';
+    }
+
+    // Resize pose canvas to match container
+    poseCanvasEl.width = poseCanvasEl.offsetWidth;
+    poseCanvasEl.height = poseCanvasEl.offsetHeight;
+  });
+
+  navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false })
+    .then(stream => {
+      videoEl.srcObject = stream;
+      document.querySelector('.cam-permission-note').style.display = 'none';
+
+      const camera = new Camera(videoEl, {
+        onFrame: async () => { await pose.send({ image: videoEl }); },
+        width: 320,
+        height: 240
+      });
+      camera.start();
+    })
+    .catch(err => {
+      console.warn('Camera access denied or unavailable:', err);
+      document.getElementById('tracking-label').textContent = 'NO CAMERA';
+      document.querySelector('.cam-permission-note').textContent = 'Gunakan ← → / A D untuk bermain tanpa kamera';
+    });
+}
+
+// ===================== GAME LOGIC =====================
+function startGame() {
+  score = 0; level = 1; lives = 3; speed = BASE_SPEED;
+  frameCount = 0; spawnInterval = 90;
+  obstacles = []; particles = [];
+  charX = W / 2;
+  targetCharX = W / 2;
+  charY = H - 90;
+  smoothPoseX = 0.5;
+  invincible = false;
+  updateHUD();
+  gameRunning = true;
+  document.getElementById('hud').classList.remove('hidden');
+  if (animId) cancelAnimationFrame(animId);
+  loop(0);
+}
+
+function loop(ts) {
+  const dt = Math.min((ts - lastTime) / 16.67, 3);
+  lastTime = ts;
+
+  update(dt);
+  draw();
+
+  if (gameRunning) animId = requestAnimationFrame(loop);
+}
+
+function update(dt) {
+  frameCount++;
+
+  // Level up
+  level = Math.floor(score / 300) + 1;
+  speed = Math.min(BASE_SPEED + (level - 1) * 0.5, MAX_SPEED);
+  spawnInterval = Math.max(40, 90 - level * 6);
+
+  // Smooth body tracking
+  smoothPoseX += (poseX - smoothPoseX) * 0.12;
+
+  // Character movement
+  if (trackingActive) {
+    // Remap 0.15..0.85 → full lane range, clamp edges
+    const remapped = Math.max(0, Math.min(1, (smoothPoseX - 0.15) / 0.7));
+    targetCharX = CHAR_W/2 + remapped * (W - CHAR_W);
+  } else {
+    // Keyboard fallback
+    const spd = 6 * dt;
+    if (keys['ArrowLeft'] || keys['a'] || keys['A']) targetCharX -= spd * 14;
+    if (keys['ArrowRight'] || keys['d'] || keys['D']) targetCharX += spd * 14;
+    targetCharX = Math.max(CHAR_W/2, Math.min(W - CHAR_W/2, targetCharX));
+  }
+
+  charX += (targetCharX - charX) * 0.18 * dt;
+  charX = Math.max(CHAR_W/2, Math.min(W - CHAR_W/2, charX));
+
+  // Spawn obstacles
+  if (frameCount % spawnInterval === 0) spawnObstacle();
+
+  // Move obstacles
+  for (let i = obstacles.length - 1; i >= 0; i--) {
+    const o = obstacles[i];
+    o.y += speed * dt;
+
+    // Score when obstacle passes character row
+    if (!o.scored && o.y + HOLE_HEIGHT > charY) {
+      o.scored = true;
+      score += 10;
+      updateHUD();
+    }
+
+    // Collision check
+    if (!invincible && o.y < charY + CHAR_H/2 && o.y + HOLE_HEIGHT > charY - CHAR_H/2) {
+      // Check if char is inside the hole
+      const inHole = charX + CHAR_W/2 > o.holeX && charX - CHAR_W/2 < o.holeX + o.holeW;
+      if (!inHole) {
+        // Hit the solid ground!
+        loseLife();
+      }
+    }
+
+    if (o.y > H + 50) obstacles.splice(i, 1);
+  }
+
+  // Particles
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.vy += 0.15 * dt;
+    p.life -= 0.025 * dt;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+
+  // Invincibility timer
+  if (invincible) {
+    invincibleTimer -= dt;
+    if (invincibleTimer <= 0) invincible = false;
+  }
+}
+
+function spawnObstacle() {
+  // Road width covers full canvas
+  // Hole width: 1.5 to 2.5 lane widths
+  const lanePx = W / LANES;
+  const holeW = lanePx * (1.4 + Math.random() * 1.2);
+  // Place hole so it fits within the road with some margin
+  const margin = 20;
+  const holeX = margin + Math.random() * (W - holeW - margin * 2);
+
+  obstacles.push({
+    y: -HOLE_HEIGHT,
+    holeX,
+    holeW,
+    scored: false,
+    color: `hsl(${200 + Math.random()*40}, 60%, ${20 + level * 3}%)`
+  });
+}
+
+function loseLife() {
+  lives--;
+  spawnParticles(charX, charY, '#ff4444', 18);
+  invincible = true;
+  invincibleTimer = 90;
+  updateHUD();
+
+  if (lives <= 0) {
+    gameOver();
+  }
+}
+
+function spawnParticles(x, y, color, n) {
+  for (let i = 0; i < n; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const spd = 2 + Math.random() * 4;
+    particles.push({
+      x, y,
+      vx: Math.cos(angle) * spd,
+      vy: Math.sin(angle) * spd - 2,
+      life: 1,
+      color,
+      size: 2 + Math.random() * 3
+    });
+  }
+}
+
+function gameOver() {
+  gameRunning = false;
+  document.getElementById('hud').classList.add('hidden');
+  document.getElementById('score-display').textContent = `SKOR: ${score}  |  LEVEL: ${level}`;
+  document.getElementById('screen-gameover').classList.remove('hidden');
+}
+
+function updateHUD() {
+  document.getElementById('hud-score').textContent = score;
+  document.getElementById('hud-level').textContent = level;
+  const hearts = ['', '❤️', '❤️❤️', '❤️❤️❤️'];
+  document.getElementById('hud-lives').textContent = hearts[Math.max(0, lives)] || '💀';
+}
+
+// ===================== DRAW =====================
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+
+  drawBackground();
+  drawObstacles();
+  drawParticles();
+  drawCharacter();
+  drawVignette();
+}
+
+function drawBackground() {
+  // Dark asphalt road
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, '#0d1117');
+  grad.addColorStop(1, '#111827');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+
+  // Road lane markers
+  ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([20, 28]);
+  ctx.lineDashOffset = -(frameCount * speed * 0.3) % 48;
+  for (let i = 1; i < LANES; i++) {
+    const x = (W / LANES) * i;
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, H);
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+
+  // Road edge glow
+  const lgL = ctx.createLinearGradient(0, 0, 40, 0);
+  lgL.addColorStop(0, 'rgba(0,255,200,0.07)');
+  lgL.addColorStop(1, 'transparent');
+  ctx.fillStyle = lgL;
+  ctx.fillRect(0, 0, 40, H);
+
+  const lgR = ctx.createLinearGradient(W, 0, W-40, 0);
+  lgR.addColorStop(0, 'rgba(0,255,200,0.07)');
+  lgR.addColorStop(1, 'transparent');
+  ctx.fillStyle = lgR;
+  ctx.fillRect(W-40, 0, 40, H);
+}
+
+function drawObstacles() {
+  for (const o of obstacles) {
+    const y = o.y;
+
+    // Draw road segment with hole
+    // Left solid part
+    if (o.holeX > 0) {
+      drawRoadSlice(0, o.holeX, y);
+    }
+    // Right solid part
+    if (o.holeX + o.holeW < W) {
+      drawRoadSlice(o.holeX + o.holeW, W - (o.holeX + o.holeW), y);
+    }
+
+    // Hole — draw the void/abyss
+    drawHole(o.holeX, o.holeW, y);
+
+    // Edge glow on hole edges
+    ctx.strokeStyle = 'rgba(0,200,255,0.5)';
+    ctx.lineWidth = 2;
+    ctx.shadowColor = 'rgba(0,200,255,0.6)';
+    ctx.shadowBlur = 8;
+    ctx.beginPath();
+    ctx.moveTo(o.holeX, y);
+    ctx.lineTo(o.holeX, y + HOLE_HEIGHT);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(o.holeX + o.holeW, y);
+    ctx.lineTo(o.holeX + o.holeW, y + HOLE_HEIGHT);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+  }
+}
+
+function drawRoadSlice(x, w, y) {
+  // Road surface
+  ctx.fillStyle = '#1c2333';
+  ctx.fillRect(x, y, w, HOLE_HEIGHT);
+
+  // Surface texture lines
+  ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 12]);
+  for (let lx = x + 20; lx < x + w; lx += 30) {
+    ctx.beginPath();
+    ctx.moveTo(lx, y);
+    ctx.lineTo(lx, y + HOLE_HEIGHT);
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+
+  // Top edge highlight
+  ctx.fillStyle = 'rgba(255,255,255,0.08)';
+  ctx.fillRect(x, y, w, 2);
+  // Bottom shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.fillRect(x, y + HOLE_HEIGHT - 3, w, 3);
+}
+
+function drawHole(hx, hw, y) {
+  // Deep abyss
+  const abyssGrad = ctx.createLinearGradient(0, y, 0, y + HOLE_HEIGHT);
+  abyssGrad.addColorStop(0, '#000008');
+  abyssGrad.addColorStop(0.4, '#00001a');
+  abyssGrad.addColorStop(1, '#000030');
+  ctx.fillStyle = abyssGrad;
+  ctx.fillRect(hx, y, hw, HOLE_HEIGHT);
+
+  // Subtle shimmer at bottom of hole
+  const shimmer = ctx.createLinearGradient(hx, y + HOLE_HEIGHT - 30, hx, y + HOLE_HEIGHT);
+  shimmer.addColorStop(0, 'transparent');
+  shimmer.addColorStop(1, 'rgba(0,100,255,0.08)');
+  ctx.fillStyle = shimmer;
+  ctx.fillRect(hx, y + HOLE_HEIGHT - 30, hw, 30);
+}
+
+function drawCharacter() {
+  const x = charX;
+  const y = charY;
+  const flash = invincible && Math.floor(frameCount / 4) % 2 === 0;
+  if (flash) return;
+
+  const alpha = invincible ? 0.6 : 1;
+  ctx.globalAlpha = alpha;
+
+  // Shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  ctx.beginPath();
+  ctx.ellipse(x, y + CHAR_H/2 + 4, CHAR_W/2, 6, 0, 0, Math.PI*2);
+  ctx.fill();
+
+  // Body lean based on movement direction
+  const leanAmt = (targetCharX - charX) * 0.008;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(Math.max(-0.25, Math.min(0.25, leanAmt)));
+
+  // Legs (animated)
+  const legSwing = Math.sin(frameCount * 0.22) * 8;
+  ctx.fillStyle = '#2563eb';
+  // Left leg
+  ctx.save();
+  ctx.translate(-8, CHAR_H * 0.25);
+  ctx.rotate((legSwing * Math.PI) / 180);
+  ctx.fillRect(-5, 0, 10, 20);
+  ctx.restore();
+  // Right leg
+  ctx.save();
+  ctx.translate(8, CHAR_H * 0.25);
+  ctx.rotate((-legSwing * Math.PI) / 180);
+  ctx.fillRect(-5, 0, 10, 20);
+  ctx.restore();
+
+  // Body
+  ctx.fillStyle = '#1d4ed8';
+  ctx.beginPath();
+  ctx.roundRect(-CHAR_W/2 + 4, -CHAR_H/2 + 14, CHAR_W - 8, 26, 6);
+  ctx.fill();
+
+  // Arms
+  const armSwing = -legSwing;
+  ctx.fillStyle = '#1e40af';
+  // Left arm
+  ctx.save();
+  ctx.translate(-CHAR_W/2 + 3, -CHAR_H/2 + 20);
+  ctx.rotate((armSwing * Math.PI) / 180);
+  ctx.fillRect(-4, 0, 8, 16);
+  ctx.restore();
+  // Right arm
+  ctx.save();
+  ctx.translate(CHAR_W/2 - 3, -CHAR_H/2 + 20);
+  ctx.rotate((-armSwing * Math.PI) / 180);
+  ctx.fillRect(-4, 0, 8, 16);
+  ctx.restore();
+
+  // Head
+  ctx.fillStyle = '#fbbf24';
+  ctx.beginPath();
+  ctx.arc(0, -CHAR_H/2 + 10, 13, 0, Math.PI*2);
+  ctx.fill();
+
+  // Eyes
+  ctx.fillStyle = '#1e293b';
+  ctx.beginPath();
+  ctx.arc(-4, -CHAR_H/2 + 8, 2.5, 0, Math.PI*2);
+  ctx.arc(4, -CHAR_H/2 + 8, 2.5, 0, Math.PI*2);
+  ctx.fill();
+
+  // Hair
+  ctx.fillStyle = '#92400e';
+  ctx.beginPath();
+  ctx.roundRect(-10, -CHAR_H/2, 20, 8, [4, 4, 0, 0]);
+  ctx.fill();
+
+  // Shoes
+  ctx.fillStyle = '#f8fafc';
+  ctx.fillRect(-14, CHAR_H/2 - 8, 11, 7);
+  ctx.fillRect(3, CHAR_H/2 - 8, 11, 7);
+
+  ctx.restore();
+
+  // Glow when invincible
+  if (invincible) {
+    ctx.strokeStyle = 'rgba(255,200,0,0.6)';
+    ctx.lineWidth = 2;
+    ctx.shadowColor = 'rgba(255,200,0,0.8)';
+    ctx.shadowBlur = 15;
+    ctx.beginPath();
+    ctx.arc(x, y, 30, 0, Math.PI*2);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+  }
+
+  ctx.globalAlpha = 1;
+}
+
+function drawParticles() {
+  for (const p of particles) {
+    ctx.globalAlpha = p.life;
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size, 0, Math.PI*2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawVignette() {
+  const grad = ctx.createRadialGradient(W/2, H/2, H*0.3, W/2, H/2, H*0.8);
+  grad.addColorStop(0, 'transparent');
+  grad.addColorStop(1, 'rgba(0,0,0,0.45)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+}
+
+// ===================== BUTTONS =====================
+document.getElementById('btn-play').addEventListener('click', () => {
+  document.getElementById('screen-start').classList.add('hidden');
+  initPose();
+  startGame();
+});
+
+document.getElementById('btn-restart').addEventListener('click', () => {
+  document.getElementById('screen-gameover').classList.add('hidden');
+  startGame();
+});
+
+// ===================== BOOT =====================
+initCanvas();
+</script>
+</body>
+</html>
