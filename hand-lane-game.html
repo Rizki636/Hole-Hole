@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hand Lane Runner</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a0f;
+    color: #fff;
+    font-family: 'Segoe UI', sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100vh;
+    overflow: hidden;
+  }
+  h1 {
+    font-size: 1.4rem;
+    font-weight: 500;
+    letter-spacing: 0.1em;
+    color: #a0c4ff;
+    margin: 10px 0 6px;
+    text-transform: uppercase;
+  }
+  #hint {
+    font-size: 0.78rem;
+    color: #555;
+    margin-bottom: 8px;
+    letter-spacing: 0.05em;
+  }
+  #layout {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+  }
+  canvas { border-radius: 8px; }
+  #gameCanvas {
+    background: #0d0d1a;
+    border: 1px solid #1a1a3a;
+  }
+  #camWrap {
+    position: relative;
+    width: 240px;
+    height: 180px;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid #1a1a3a;
+    flex-shrink: 0;
+  }
+  #camFeed {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transform: scaleX(-1);
+    opacity: 0.5;
+  }
+  #overlayCanvas {
+    position: absolute;
+    top: 0; left: 0;
+    width: 240px;
+    height: 180px;
+    transform: scaleX(-1);
+  }
+  #gestureLabel {
+    position: absolute;
+    bottom: 6px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0,0,0,0.7);
+    color: #a0c4ff;
+    font-size: 0.72rem;
+    padding: 3px 10px;
+    border-radius: 20px;
+    white-space: nowrap;
+    letter-spacing: 0.05em;
+  }
+  #scorePanel {
+    display: flex;
+    gap: 20px;
+    margin-bottom: 8px;
+    font-size: 0.82rem;
+    color: #888;
+  }
+  #scorePanel span { color: #a0c4ff; font-weight: 500; }
+  #startBtn {
+    margin-top: 10px;
+    padding: 10px 32px;
+    background: transparent;
+    border: 1px solid #a0c4ff;
+    color: #a0c4ff;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    letter-spacing: 0.1em;
+    cursor: pointer;
+    text-transform: uppercase;
+    transition: background 0.2s, color 0.2s;
+  }
+  #startBtn:hover { background: #a0c4ff; color: #0a0a0f; }
+  #camStatus {
+    font-size: 0.72rem;
+    color: #555;
+    text-align: center;
+    margin-top: 4px;
+  }
+</style>
+</head>
+<body>
+
+<h1>Hand Lane Runner</h1>
+<div id="hint">✋ Buka telapak → kanan &nbsp;|&nbsp; ✌️ 2 jari → kiri</div>
+
+<div id="scorePanel">
+  SCORE: <span id="scoreVal">0</span> &nbsp; BEST: <span id="bestVal">0</span> &nbsp; LANE: <span id="laneVal">3/5</span>
+</div>
+
+<div id="layout">
+  <div>
+    <canvas id="gameCanvas" width="340" height="480"></canvas>
+    <div style="text-align:center"><button id="startBtn">START</button></div>
+  </div>
+  <div>
+    <div id="camWrap">
+      <video id="camFeed" autoplay playsinline muted></video>
+      <canvas id="overlayCanvas"></canvas>
+      <div id="gestureLabel">menunggu kamera...</div>
+    </div>
+    <div id="camStatus">MediaPipe loading...</div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+<script>
+const gc = document.getElementById('gameCanvas');
+const ctx = gc.getContext('2d');
+const oc = document.getElementById('overlayCanvas');
+const octx = oc.getContext('2d');
+const video = document.getElementById('camFeed');
+const gestureLabel = document.getElementById('gestureLabel');
+const camStatus = document.getElementById('camStatus');
+const scoreVal = document.getElementById('scoreVal');
+const bestVal = document.getElementById('bestVal');
+const laneVal = document.getElementById('laneVal');
+const startBtn = document.getElementById('startBtn');
+
+const W = 340, H = 480;
+const NUM_LANES = 5;
+const LANE_W = W / NUM_LANES;
+const CHAR_SIZE = 28;
+
+let gameRunning = false;
+let score = 0, best = 0;
+let currentLane = 2; // 0-indexed, start at middle (2)
+let obstacles = [];
+let frameCount = 0;
+let speed = 3;
+let lastGesture = null;
+let gestureCooldown = 0;
+let animId = null;
+let moveQueue = [];
+let pendingMove = null;
+let pendingTimer = 0;
+
+function getLaneCenterX(lane) {
+  return LANE_W * lane + LANE_W / 2;
+}
+
+function spawnObstacle() {
+  const lane = Math.floor(Math.random() * NUM_LANES);
+  obstacles.push({ lane, y: -30, w: LANE_W * 0.72, h: 22 });
+}
+
+function resetGame() {
+  score = 0;
+  currentLane = 2;
+  obstacles = [];
+  frameCount = 0;
+  speed = 3;
+  gestureCooldown = 0;
+  moveQueue = [];
+  pendingMove = null;
+  pendingTimer = 0;
+}
+
+// --- Gesture detection ---
+function countExtendedFingers(landmarks) {
+  const tips = [8, 12, 16, 20];
+  const pips = [6, 10, 14, 18];
+  let count = 0;
+  for (let i = 0; i < tips.length; i++) {
+    if (landmarks[tips[i]].y < landmarks[pips[i]].y) count++;
+  }
+  // thumb
+  if (landmarks[4].x > landmarks[3].x) count++; // mirrored
+  return count;
+}
+
+function detectGesture(landmarks) {
+  const fingers = countExtendedFingers(landmarks);
+  if (fingers >= 4) return 'open';
+  if (fingers === 2) return 'two';
+  return 'none';
+}
+
+// --- Draw game ---
+function drawLanes() {
+  ctx.fillStyle = '#0d0d1a';
+  ctx.fillRect(0, 0, W, H);
+
+  // lane lines
+  for (let i = 1; i < NUM_LANES; i++) {
+    ctx.setLineDash([12, 10]);
+    ctx.strokeStyle = '#1a1a3a';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(i * LANE_W, 0);
+    ctx.lineTo(i * LANE_W, H);
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+
+  // lane numbers
+  for (let i = 0; i < NUM_LANES; i++) {
+    ctx.fillStyle = '#1e1e3a';
+    ctx.font = '11px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(i + 1, getLaneCenterX(i), 14);
+  }
+}
+
+function drawCharacter() {
+  const x = getLaneCenterX(currentLane);
+  const y = H - 60;
+
+  // glow behind character
+  ctx.shadowBlur = 18;
+  ctx.shadowColor = '#5b9af8';
+
+  // body
+  ctx.fillStyle = '#5b9af8';
+  ctx.beginPath();
+  ctx.roundRect(x - CHAR_SIZE/2, y - CHAR_SIZE/2, CHAR_SIZE, CHAR_SIZE, 6);
+  ctx.fill();
+
+  ctx.shadowBlur = 0;
+
+  // arrow
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 14px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('▲', x, y);
+  ctx.textBaseline = 'alphabetic';
+}
+
+function drawObstacles() {
+  obstacles.forEach(ob => {
+    const x = getLaneCenterX(ob.lane);
+    const grad = ctx.createLinearGradient(x - ob.w/2, ob.y, x + ob.w/2, ob.y + ob.h);
+    grad.addColorStop(0, '#ff4f4f');
+    grad.addColorStop(1, '#a00');
+    ctx.fillStyle = grad;
+    ctx.shadowBlur = 10;
+    ctx.shadowColor = '#ff4f4f44';
+    ctx.beginPath();
+    ctx.roundRect(x - ob.w/2, ob.y, ob.w, ob.h, 4);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  });
+}
+
+function drawHUD() {
+  ctx.fillStyle = '#a0c4ff';
+  ctx.font = '500 13px Segoe UI';
+  ctx.textAlign = 'left';
+  ctx.fillText(`SCORE  ${score}`, 10, H - 10);
+  ctx.textAlign = 'right';
+  ctx.fillText(`SPEED  ${speed.toFixed(1)}`, W - 10, H - 10);
+}
+
+function drawOverlay(msg) {
+  ctx.fillStyle = 'rgba(0,0,0,0.72)';
+  ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#a0c4ff';
+  ctx.font = '500 22px Segoe UI';
+  ctx.textAlign = 'center';
+  ctx.fillText(msg, W/2, H/2 - 20);
+  ctx.fillStyle = '#666';
+  ctx.font = '13px Segoe UI';
+  ctx.fillText('Tekan START untuk mulai', W/2, H/2 + 14);
+}
+
+function checkCollision() {
+  const cx = getLaneCenterX(currentLane);
+  const cy = H - 60;
+  for (let ob of obstacles) {
+    const ox = getLaneCenterX(ob.lane);
+    if (ob.lane === currentLane) {
+      const oy = ob.y + ob.h / 2;
+      if (Math.abs(cy - oy) < (CHAR_SIZE/2 + ob.h/2) - 4) return true;
+    }
+  }
+  return false;
+}
+
+function gameLoop() {
+  if (!gameRunning) return;
+  frameCount++;
+  score++;
+  speed = 3 + Math.floor(score / 300) * 0.4;
+
+  // process move queue with cooldown
+  if (gestureCooldown > 0) gestureCooldown--;
+  if (gestureCooldown === 0 && pendingMove !== null) {
+    currentLane = Math.max(0, Math.min(4, currentLane + pendingMove));
+    pendingMove = null;
+    gestureCooldown = 28;
+  }
+
+  // spawn
+  if (frameCount % Math.max(45, 80 - Math.floor(score / 200) * 5) === 0) {
+    spawnObstacle();
+  }
+
+  // move obstacles
+  obstacles.forEach(ob => ob.y += speed);
+  obstacles = obstacles.filter(ob => ob.y < H + 40);
+
+  // collision
+  if (checkCollision()) {
+    gameRunning = false;
+    if (score > best) best = score;
+    bestVal.textContent = best;
+    drawLanes();
+    drawObstacles();
+    drawCharacter();
+    drawOverlay(`GAME OVER — ${score} pts`);
+    startBtn.textContent = 'RESTART';
+    return;
+  }
+
+  drawLanes();
+  drawObstacles();
+  drawCharacter();
+  drawHUD();
+
+  scoreVal.textContent = score;
+  laneVal.textContent = `${currentLane + 1}/5`;
+
+  animId = requestAnimationFrame(gameLoop);
+}
+
+startBtn.addEventListener('click', () => {
+  if (animId) cancelAnimationFrame(animId);
+  resetGame();
+  gameRunning = true;
+  startBtn.textContent = 'RESTART';
+  gameLoop();
+});
+
+// Init idle screen
+drawLanes();
+drawOverlay('HAND LANE RUNNER');
+
+// --- MediaPipe ---
+const CONNECTIONS = window.HAND_CONNECTIONS || [
+  [0,1],[1,2],[2,3],[3,4],
+  [0,5],[5,6],[6,7],[7,8],
+  [5,9],[9,10],[10,11],[11,12],
+  [9,13],[13,14],[14,15],[15,16],
+  [13,17],[0,17],[17,18],[18,19],[19,20]
+];
+
+function drawHandSkeleton(landmarks) {
+  const W2 = 240, H2 = 180;
+  octx.clearRect(0, 0, W2, H2);
+
+  // connections
+  octx.strokeStyle = '#5b9af8';
+  octx.lineWidth = 1.5;
+  octx.shadowBlur = 6;
+  octx.shadowColor = '#5b9af888';
+  CONNECTIONS.forEach(([a, b]) => {
+    octx.beginPath();
+    octx.moveTo(landmarks[a].x * W2, landmarks[a].y * H2);
+    octx.lineTo(landmarks[b].x * W2, landmarks[b].y * H2);
+    octx.stroke();
+  });
+
+  // joints
+  const fingerColors = ['#a0c4ff','#7ec8e3','#74f7d4','#f7c974','#ff9a9a'];
+  const fingerGroups = [[0],[1,2,3,4],[5,6,7,8],[9,10,11,12],[13,14,15,16],[17,18,19,20]];
+  landmarks.forEach((lm, i) => {
+    let color = '#a0c4ff';
+    for (let f = 0; f < fingerGroups.length; f++) {
+      if (fingerGroups[f].includes(i)) { color = fingerColors[Math.min(f, 4)]; break; }
+    }
+    const isTip = [4,8,12,16,20].includes(i);
+    octx.shadowBlur = isTip ? 12 : 4;
+    octx.shadowColor = color + 'aa';
+    octx.fillStyle = color;
+    octx.beginPath();
+    octx.arc(lm.x * W2, lm.y * H2, isTip ? 5 : 3, 0, Math.PI * 2);
+    octx.fill();
+  });
+
+  octx.shadowBlur = 0;
+}
+
+const hands = new Hands({
+  locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
+});
+
+hands.setOptions({
+  maxNumHands: 1,
+  modelComplexity: 1,
+  minDetectionConfidence: 0.7,
+  minTrackingConfidence: 0.6
+});
+
+hands.onResults(results => {
+  if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+    const lm = results.multiHandLandmarks[0];
+    drawHandSkeleton(lm);
+
+    const gesture = detectGesture(lm);
+    if (gesture === 'open') {
+      gestureLabel.textContent = '✋ Buka Penuh → KANAN';
+      gestureLabel.style.color = '#74f7d4';
+      if (lastGesture !== 'open' && gameRunning) {
+        pendingMove = 1;
+        lastGesture = 'open';
+      }
+    } else if (gesture === 'two') {
+      gestureLabel.textContent = '✌️ Dua Jari → KIRI';
+      gestureLabel.style.color = '#f7c974';
+      if (lastGesture !== 'two' && gameRunning) {
+        pendingMove = -1;
+        lastGesture = 'two';
+      }
+    } else {
+      gestureLabel.textContent = '🤚 Tangan Terdeteksi';
+      gestureLabel.style.color = '#a0c4ff';
+      lastGesture = null;
+    }
+  } else {
+    octx.clearRect(0, 0, 240, 180);
+    gestureLabel.textContent = 'Arahkan tangan ke kamera';
+    gestureLabel.style.color = '#555';
+    lastGesture = null;
+  }
+});
+
+const camera = new Camera(video, {
+  onFrame: async () => { await hands.send({ image: video }); },
+  width: 240,
+  height: 180
+});
+
+camera.start()
+  .then(() => { camStatus.textContent = ''; })
+  .catch(e => { camStatus.textContent = 'Izinkan akses kamera untuk bermain'; });
+</script>
+</body>
+</html>
